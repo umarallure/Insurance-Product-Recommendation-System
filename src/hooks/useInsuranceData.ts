@@ -48,6 +48,20 @@ export const useInsuranceData = () => {
             .map(q => q.question_text)
         }));
 
+        // Sort products in the intended order
+        const tierOrder = [
+          'Preferred',
+          'Standard',
+          'Graded',
+          'Modified',
+          'Ultimate'
+        ];
+        productsWithQuestions.sort((a, b) => {
+          const aIndex = tierOrder.indexOf(a.tier);
+          const bIndex = tierOrder.indexOf(b.tier);
+          return aIndex - bIndex;
+        });
+
         setProducts(productsWithQuestions);
       } catch (err) {
         console.error('Error fetching insurance data:', err);

@@ -16,6 +16,12 @@ interface QualificationState {
   responses: { [question: string]: boolean };
 }
 
+// This component implements the insurance qualification flow:
+// 1. Start with "Liberty Preferred" and ask all its questions.
+// 2. If the user is disqualified by any question, move to the next product and repeat.
+// 3. Continue until a product is qualified or all are exhausted.
+// 4. Every question for each product is asked (no skipping).
+// 5. (Future) To avoid repetitive questions across products, deduplication logic can be added.
 const InsuranceQualifier = () => {
   const { products, loading, error } = useInsuranceData();
   const { saveResponse, saveResult } = useQualificationSession();
@@ -32,44 +38,41 @@ const InsuranceQualifier = () => {
   const [currentQuestion, setCurrentQuestion] = useState<string>('');
   const [showIntro, setShowIntro] = useState(true);
 
-  // Get unique questions for current product that haven't been asked
-  const getUniqueQuestionsForCurrentProduct = () => {
+  // Get all questions for the current product (no filtering)
+  const getQuestionsForCurrentProduct = () => {
     if (!products[state.currentProductIndex]) return [];
-    const currentProduct = products[state.currentProductIndex];
-    return currentProduct.disqualifying_questions.filter(
-      question => !state.askedQuestions.has(question)
-    );
+    return products[state.currentProductIndex].disqualifying_questions;
   };
 
   // Initialize or update current question
   useEffect(() => {
     if (!showIntro && !state.isComplete && products.length > 0) {
-      const uniqueQuestions = getUniqueQuestionsForCurrentProduct();
-      if (uniqueQuestions.length > 0 && state.currentQuestionIndex < uniqueQuestions.length) {
-        setCurrentQuestion(uniqueQuestions[state.currentQuestionIndex]);
+      const questions = getQuestionsForCurrentProduct();
+      if (questions.length > 0 && state.currentQuestionIndex < questions.length) {
+        setCurrentQuestion(questions[state.currentQuestionIndex]);
       }
     }
   }, [state.currentProductIndex, state.currentQuestionIndex, showIntro, state.isComplete, products]);
 
+  // Handles the user's answer to a question.
+  // If the answer is disqualifying ("Yes"), move to the next product.
+  // Otherwise, continue to the next question for the current product.
   const handleAnswer = async (answer: boolean) => {
     const question = currentQuestion;
-    
-    // Save response to database (note: we don't have question IDs in the current structure)
-    // For now, we'll just save the response locally
-    
     setState(prev => ({
       ...prev,
       askedQuestions: new Set([...prev.askedQuestions, question]),
       responses: { ...prev.responses, [question]: answer }
     }));
 
+    const questions = getQuestionsForCurrentProduct();
+
     if (answer) {
-      // Disqualified from current product, move to next tier
+      // Disqualified from current product, move to next product
       moveToNextProduct();
     } else {
       // Continue with next question for current product
-      const uniqueQuestions = getUniqueQuestionsForCurrentProduct();
-      if (state.currentQuestionIndex + 1 < uniqueQuestions.length) {
+      if (state.currentQuestionIndex + 1 < questions.length) {
         setState(prev => ({
           ...prev,
           currentQuestionIndex: prev.currentQuestionIndex + 1
@@ -82,7 +85,6 @@ const InsuranceQualifier = () => {
           qualifiedProduct,
           isComplete: true
         }));
-        
         // Save result to database
         await saveResult(qualifiedProduct.id);
       }
@@ -276,9 +278,9 @@ const InsuranceQualifier = () => {
   }
 
   const currentProduct = products[state.currentProductIndex];
-  const uniqueQuestions = getUniqueQuestionsForCurrentProduct();
-  const questionProgress = uniqueQuestions.length > 0 ? 
-    ((state.currentQuestionIndex + 1) / uniqueQuestions.length) * 100 : 100;
+  const questions = getQuestionsForCurrentProduct();
+  const questionProgress = questions.length > 0 ? 
+    ((state.currentQuestionIndex + 1) / questions.length) * 100 : 100;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -305,7 +307,7 @@ const InsuranceQualifier = () => {
           <CardHeader>
             <CardTitle className="text-2xl">Health Question</CardTitle>
             <CardDescription>
-              Question {state.currentQuestionIndex + 1} of {uniqueQuestions.length} for {currentProduct?.name}
+              Question {state.currentQuestionIndex + 1} of {questions.length} for {currentProduct?.name}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
