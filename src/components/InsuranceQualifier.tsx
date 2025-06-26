@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { CheckCircle, XCircle, Heart, Shield, Star, FileText, Loader2 } from 'lucide-react';
 import { useInsuranceData, InsuranceProduct } from '@/hooks/useInsuranceData';
 import { useQualificationSession } from '@/hooks/useQualificationSession';
+import { toast } from '@/components/ui/use-toast';
 
 interface QualificationState {
   currentProductIndex: number;
@@ -68,7 +69,12 @@ const InsuranceQualifier = () => {
     const questions = getQuestionsForCurrentProduct();
 
     if (answer) {
-      // Disqualified from current product, move to next product
+      // Disqualified from current product, show notification and move to next product
+      toast({
+        title: `Disqualified for ${products[state.currentProductIndex].name}`,
+        description: `We'll try to qualify you for the next available product.`,
+        variant: 'destructive',
+      });
       moveToNextProduct();
     } else {
       // Continue with next question for current product
