@@ -23,6 +23,67 @@ interface QualificationState {
 // 3. Continue until a product is qualified or all are exhausted.
 // 4. Every question for each product is asked (no skipping).
 // 5. (Future) To avoid repetitive questions across products, deduplication logic can be added.
+// Map of normalized common question keys to the products they affect
+const COMMON_QUESTION_MAP: Record<string, string[]> = {
+  // Normalize by lowercasing and removing punctuation/extra spaces for matching
+  // --- Existing mappings ---
+  'do you use oxygen': ['Royal Graded', 'Liberty Modified'],
+  'do you have als': ['Royal Graded', 'Liberty Modified'],
+  'do you have congestive heart failure': ['Royal Graded', 'Liberty Modified'],
+  'have you had an organ transplant': ['Royal Graded', 'Liberty Modified'],
+  'have you been diagnosed with a terminal illness': ['Royal Graded', 'Liberty Modified'],
+  'do you experience memory loss': ['Royal Graded', 'Liberty Modified'],
+  'do you have systemic lupus': ['Royal Graded', 'Liberty Standard'],
+  'do you have sickle cell anemia': ['Royal Graded', 'Liberty Standard'],
+  'do you have kidney failure': ['Royal Graded', 'Liberty Modified'],
+  'do you have chronic kidney disease': ['Royal Graded', 'Liberty Modified'],
+  'do you have insulin-dependent diabetes': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have diabetic complications': ['Liberty Preferred', 'Liberty Standard'],
+  'were you diagnosed with diabetes at age 9 or younger': ['Liberty Preferred', 'Liberty Standard', 'Liberty Modified'],
+  'have you had two or more instances of internal cancer': ['Royal Graded', 'Liberty Modified'],
+  'have you had more than one occurrence of cancer': ['Royal Graded', 'Liberty Modified'],
+  'do you use a wheelchair': ['Liberty Preferred', 'Liberty Standard'],
+  'do you use a walker': ['Liberty Preferred', 'Liberty Standard'],
+  'do you use a scooter': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have a heart defibrillator implant': ['Royal Graded', 'Liberty Modified'],
+  'have you ever used a defibrillator': ['Royal Graded', 'Liberty Modified'],
+  'are you currently residing in a nursing home': ['Royal Graded', 'Liberty Modified'],
+  'are you currently in a hospice': ['Royal Graded', 'Liberty Modified'],
+  'are you currently in a nursing home': ['Royal Graded', 'Liberty Modified'],
+  'are you currently in a long-term care': ['Royal Graded', 'Liberty Modified'],
+  'are you currently in a memory care facility': ['Royal Graded', 'Liberty Modified'],
+  'are you currently residing in a hospice': ['Royal Graded', 'Liberty Modified'],
+  'are you currently residing in a long-term care': ['Royal Graded', 'Liberty Modified'],
+  'are you currently residing in a memory care facility': ['Royal Graded', 'Liberty Modified'],
+  // --- New mappings for Liberty Preferred & Liberty Standard commons ---
+  'have you had a tia': ['Liberty Preferred', 'Liberty Standard'],
+  'have you had a mini stroke': ['Liberty Preferred', 'Liberty Standard'],
+  'have you had a stroke': ['Liberty Preferred', 'Liberty Standard'],
+  'have you had paralysis within the last two years': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have irregular heartbeat': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have heart or circulatory disease': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have valve disorder': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have angina': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have pacemaker': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have stent': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have atrial fibrillation': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have parkinsons': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have epileptic seizures': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have multiple sclerosis': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have mobility limitations': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have peripheral vascular disease': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have peripheral artery disease': ['Liberty Preferred', 'Liberty Standard'],
+  'do you have circulatory problems': ['Liberty Preferred', 'Liberty Standard'],
+};
+
+function normalizeQuestion(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const InsuranceQualifier = () => {
   const { products, loading, error } = useInsuranceData();
   const { saveResponse, saveResult } = useQualificationSession();
@@ -38,6 +99,8 @@ const InsuranceQualifier = () => {
 
   const [currentQuestion, setCurrentQuestion] = useState<string>('');
   const [showIntro, setShowIntro] = useState(true);
+  // Track products to auto-disqualify due to common question disqualification
+  const [autoDisqualifiedProducts, setAutoDisqualifiedProducts] = useState<Set<string>>(new Set());
 
   // Get all questions for the current product (no filtering)
   const getQuestionsForCurrentProduct = () => {
@@ -67,8 +130,19 @@ const InsuranceQualifier = () => {
     }));
 
     const questions = getQuestionsForCurrentProduct();
+    const normalized = normalizeQuestion(question);
 
     if (answer) {
+      // If this is a common question, mark all affected products for auto-disqualification
+      if (COMMON_QUESTION_MAP[normalized]) {
+        setAutoDisqualifiedProducts(prev => {
+          const newSet = new Set(prev);
+          for (const prod of COMMON_QUESTION_MAP[normalized]) {
+            newSet.add(prod);
+          }
+          return newSet;
+        });
+      }
       // Disqualified from current product, show notification and move to next product
       toast({
         title: `Disqualified for ${products[state.currentProductIndex].name}`,
@@ -98,10 +172,20 @@ const InsuranceQualifier = () => {
   };
 
   const moveToNextProduct = async () => {
-    if (state.currentProductIndex + 1 < products.length) {
+    let nextIndex = state.currentProductIndex + 1;
+    // Skip any products that are auto-disqualified
+    while (nextIndex < products.length && autoDisqualifiedProducts.has(products[nextIndex].name)) {
+      toast({
+        title: `Auto-disqualified for ${products[nextIndex].name}`,
+        description: `You were already disqualified for a common question in a previous product.`,
+        variant: 'destructive',
+      });
+      nextIndex++;
+    }
+    if (nextIndex < products.length) {
       setState(prev => ({
         ...prev,
-        currentProductIndex: prev.currentProductIndex + 1,
+        currentProductIndex: nextIndex,
         currentQuestionIndex: 0
       }));
     } else {
@@ -111,7 +195,6 @@ const InsuranceQualifier = () => {
         isComplete: true,
         qualifiedProduct: null
       }));
-      
       // Save result to database (no qualification)
       await saveResult(null);
     }
